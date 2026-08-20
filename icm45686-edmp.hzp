@@ -4,16 +4,16 @@
     <configuration
       Name="Common"
       c_only_additional_options="-Wall;-Wextra;-Wstrict-prototypes;-Wmissing-prototypes;-Wmissing-declarations;-Wshadow;-Wpointer-arith;-Wbad-function-cast;-Wcast-align;-Wcast-qual;-Wjump-misses-init;-Wno-unused-parameter;-Wundef"
-      c_system_include_directories="$(ProjectDir)/../freertos/src/inc"
-      c_user_include_directories="$(ProjectDir)/../inc;$(ProjectDir)/../sys/src;$(ProjectDir)/../ucdrv/src;$(ProjectDir)/../icm45686/src;$(ProjectDir)/../hal/src/inc"
+      c_system_include_directories="$(TargetsDir)/CMSIS_3/CMSIS/Include;$(ProjectDir)/../freertos/src/inc"
+      c_user_include_directories="$(ProjectDir)/../inc;$(ProjectDir)/../sys/src;$(ProjectDir)/../ucdrv/inc;$(ProjectDir)/../ucdrv/src;$(ProjectDir)/../icm45686/src;$(ProjectDir)/../hal/src/inc;$(ProjectDir)/../cmdln/src"
       project_directory=""
       project_type="Library" />
     <folder Name="src">
       <file Name="icm45686-edmp.c" file_name="src/icm45686-edmp.c" />
       <file Name="icm45686-edmp.h" file_name="src/icm45686-edmp.h" />
-      <file
-        Name="icm45686-edmp_def.h"
-        file_name="src/icm45686-edmp_def.h" />
+      <file Name="icm45686-edmp_def.h" file_name="src/icm45686-edmp_def.h" />
+      <file Name="icm45686_stm_edmp.c" file_name="src/icm45686_stm_edmp.c" />
+      <file Name="icm45686_stm_edmp.h" file_name="src/icm45686_stm_edmp.h" />
     </folder>
   </project>
 </solution>

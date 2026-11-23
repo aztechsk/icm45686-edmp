@@ -15,6 +15,7 @@
 #include "sysconf.h"
 #include "board.h"
 #include <mmio.h>
+#include <atom.h>
 #include "msgconf.h"
 #include "criterr.h"
 #include "hwerr.h"
@@ -26,23 +27,50 @@
 #include "icm45686-edmp.h"
 #include "icm45686_stm_edmp.h"
 
+#ifndef ICM45686_SENSOR_MODE
+#error "ICM45686_SENSOR_MODE not defined; define it in sysconf.h"
+#endif
+#ifndef ICM45686_APEX_MODE
+#error "ICM45686_APEX_MODE not defined; define it in sysconf.h"
+#endif
+
 #if ICM45686_SENSOR_MODE == ICM45686_APEX_MODE
 
+#ifndef ICM45686_APEX_ODR
+#error "ICM45686_APEX_ODR not defined; define it in sysconf.h"
+#endif
+#if ICM45686_APEX_ODR != ICM45686_APEX_ODR_400HZ && ICM45686_APEX_ODR != ICM45686_APEX_ODR_800HZ
+#error "ICM45686_APEX_ODR must be 400 or 800 Hz"
+#endif
+#ifdef ICM45686_RESET_STM_TMO_MS
+#if ICM45686_RESET_STM_TMO_MS <= 0
+#error "ICM45686_RESET_STM_TMO_MS must be positive"
+#endif
+#endif
 #define WAIT_ISR_SIG_TMO_MS 200
-#define RESET_STM_TMO_MS 5000
 
 static TaskHandle_t tsk_hndl;
 static struct icm_45686_dsc icm_45686_dsc;
 static icm_45686 icm = &icm_45686_dsc;
 static p_stf_t stmf;
 static SemaphoreHandle_t isr_sig;
+static volatile boolean_t irq_armed;
 static unsigned int odr_us;
 
 static struct {
 	unsigned int edmp_event_cnt;
 	unsigned int unkn_intr_cnt;
 	unsigned int unkn_apex_intr_cnt;
+	volatile unsigned int irq_pin_high_cnt;
+	volatile unsigned int stale_irq_cnt;
 	unsigned int stm_rst_cnt;
+	unsigned int sw_reset_err_cnt;
+	unsigned int probe_err_cnt;
+	unsigned int cfg_err_cnt;
+	unsigned int edmp_init_err_cnt;
+	unsigned int int_stat_err_cnt;
+	unsigned int apex_stat_err_cnt;
+	unsigned int tap_data_err_cnt;
 } stats;
 
 static gfp_t state_sw_reset(void);
@@ -56,7 +84,7 @@ static BaseType_t int1_isr_clbk(uint32_t status);
 static gfp_t state_error(void);
 static void tsk(void *p);
 static void cmd_icms(void);
-static void log_tap_config(icm_45686_edmp_apex_parameters_t *ap);
+static void log_tap_config(const icm_45686_edmp_apex_parameters_t *ap);
 static char tap_axis_to_ch(icm_45686_edmp_tap_axis_t axis);
 static char tap_dir_to_ch(icm_45686_edmp_tap_dir_t dir);
 
@@ -76,14 +104,14 @@ void init_icm45686_stm_edmp(void)
 	icm->spi.cfg.csel_cont = gpio_hal_get_ctrl(ICM45686_CS_CONT_ID);
 	icm->spi.cfg.csel_pin = ICM45686_CS_PIN_ID;
 	init_icm_45686(icm);
-	if (NULL == (isr_sig = xSemaphoreCreateBinary())) {
+	if ((isr_sig = xSemaphoreCreateBinary()) == NULL) {
 		crit_err_exit(MALLOC_ERROR);
 	}
 	add_command_noargs("icms", cmd_icms);
-        if (pdPASS != xTaskCreate(tsk, "ICM45686", ICM45686_TASK_STACK_SIZE, NULL,
-                                  ICM45686_TASK_PRIO, &tsk_hndl)) {
-                crit_err_exit(MALLOC_ERROR);
-        }
+	if (xTaskCreate(tsk, "ICM45686", ICM45686_TASK_STACK_SIZE, NULL,
+			ICM45686_TASK_PRIO, &tsk_hndl) != pdPASS) {
+		crit_err_exit(MALLOC_ERROR);
+	}
 }
 
 /**
@@ -93,8 +121,12 @@ static gfp_t state_sw_reset(void)
 {
 	int ret;
 
+	gpio_hal_intr_disable(ICM45686_INT1_CONT, ICM45686_INT1_PIN);
+	irq_armed = FALSE;
+	(void) xSemaphoreTake(isr_sig, 0);
 	ret = icm_45686_soft_reset(icm);
 	if (ret) {
+		stats.sw_reset_err_cnt++;
 		msg(INF, "ICM45686: Soft reset error (%s)\n", hwerr_str(ret));
 		return ((gfp_t) state_error);
 	}
@@ -111,6 +143,7 @@ static gfp_t state_whoami_check(void)
 
 	ret = icm_45686_whoami_check(icm);
 	if (ret) {
+		stats.probe_err_cnt++;
 		msg(INF, "ICM45686: whoami_check() error (%s)\n", hwerr_str(ret));
 		return ((gfp_t) state_error);
 	}
@@ -126,6 +159,7 @@ static gfp_t set_spi_slew(void)
 
 	ret = icm_45686_set_spi_pads_slew(icm, ICM45686_PADS_SPI_SLEW);
 	if (ret) {
+		stats.cfg_err_cnt++;
 		msg(INF, "ICM45686: set_spi_slew() error (%s)\n", hwerr_str(ret));
 		return ((gfp_t) state_error);
 	}
@@ -153,13 +187,9 @@ static gfp_t intr_cfg(void)
 	pin_cfg.mode = ICM_45686_INT1_CONFIG2_MODE_PULSE;
 	pin_cfg.drive = ICM_45686_INT1_CONFIG2_DRIVE_PP;
 #else
- #error "ICM45686_INTR_TYPE unknown"
+#error "ICM45686_INTR_TYPE unknown"
 #endif
 	if ((ret = icm_45686_set_config_int_pin(icm, ICM_45686_INT1, &pin_cfg))) {
-		goto err;
-	}
-	int_cfg.edmp_event = ICM_45686_ENABLE;
-	if ((ret = icm_45686_set_config_int_source(icm, ICM_45686_INT1, &int_cfg))) {
 		goto err;
 	}
 	if ((ret = icm_45686_get_int_status(icm, ICM_45686_INT1, &int_cfg))) {
@@ -174,14 +204,14 @@ static gfp_t intr_cfg(void)
 #elif ICM45686_INTR_TYPE == FALL_EDGE_INTR_TYPE
 	gpio_hal_intr_config(ICM45686_INT1_CONT, ICM45686_INT1_PIN, GPIO_HAL_INTR_FALLING);
 #else
- #error "ICM45686_INTR_TYPE unknown"
+#error "ICM45686_INTR_TYPE unknown"
 #endif
 	if (!gpio_hal_isr_registered(ICM45686_INT1_CONT, int1_isr_clbk)) {
 		gpio_hal_isr_register(ICM45686_INT1_CONT, int1_isr_clbk);
 	}
-	gpio_hal_intr_enable(ICM45686_INT1_CONT, ICM45686_INT1_PIN);
 	return ((gfp_t) init_edmp);
 err:
+	stats.cfg_err_cnt++;
 	msg(INF, "ICM45686: intr_cfg() error (%s)\n", hwerr_str(ret));
 	return ((gfp_t) state_error);
 }
@@ -196,6 +226,7 @@ static gfp_t init_edmp(void)
 	enum icm_45686_accel_config0_odr accel_odr;
 	icm_45686_edmp_apex_parameters_t apex_parameters;
 	icm_45686_edmp_int_state_t apex_int_config = {0};
+	struct icm_45686_int_bitmap int_cfg = {0};
 
 	if ((ret = icm_45686_edmp_init_apex(icm))) {
 		goto err;
@@ -204,7 +235,7 @@ static gfp_t init_edmp(void)
 	odr_us = 2500;
 	dmp_odr = ICM_45686_DMP_EXT_SEN_ODR_CFG_APEX_ODR_400_HZ;
 	accel_odr = ICM_45686_ACCEL_CONFIG0_ODR_400_HZ;
-#else
+#elif ICM45686_APEX_ODR == ICM45686_APEX_ODR_800HZ
 	odr_us = 1250;
 	dmp_odr = ICM_45686_DMP_EXT_SEN_ODR_CFG_APEX_ODR_800_HZ;
 	accel_odr = ICM_45686_ACCEL_CONFIG0_ODR_800_HZ;
@@ -246,22 +277,13 @@ static gfp_t init_edmp(void)
 	if ((ret = icm_45686_edmp_get_apex_parameters(icm, &apex_parameters))) {
 		goto err;
 	}
-	if (dmp_odr == ICM_45686_DMP_EXT_SEN_ODR_CFG_APEX_ODR_800_HZ) {
-		apex_parameters.tap_tmax = ICM_45686_TAP_TMAX_800HZ;
-		apex_parameters.tap_tmin = ICM_45686_TAP_TMIN_800HZ;
-		apex_parameters.tap_smudge_reject_th = ICM_45686_TAP_SMUDGE_REJECT_THR_800HZ;
-	} else {
-		apex_parameters.tap_tmax = ICM_45686_TAP_TMAX_400HZ;
-		apex_parameters.tap_tmin = ICM_45686_TAP_TMIN_400HZ;
-		apex_parameters.tap_smudge_reject_th = ICM_45686_TAP_SMUDGE_REJECT_THR_400HZ;
-	}
 	/*
 	 * TAP_TMIN
 	 * Single tap window, sub-windows within Tmax to detect single-tap event.
 	 * Unit: Time in sample number.
 	 * Range: [24 - 184].
 	 */
-        apex_parameters.tap_tmin = ICM45686_APEX_TAP_TMIN;
+	apex_parameters.tap_tmin = ICM45686_APEX_TAP_TMIN;
 	/*
 	 * TAP_TMAX
 	 * Size of the analysis window to detect tap events (single-tap or double-tap).
@@ -289,7 +311,7 @@ static gfp_t init_edmp(void)
 	 * Maximum peak tolerance is the percentage of pulse amplitude
 	 * to get the smudge threshold for rejection.
 	 * Range: [1 (12.5%) 2 (25.0%) 3 (37.5%) 4 (50.0 %)].
-         */
+	 */
 	apex_parameters.tap_max_peak_tol = ICM45686_APEX_TAP_MAX_PEAK_TOL;
 	/*
 	 * APEX_TAP_TAVG
@@ -314,11 +336,20 @@ static gfp_t init_edmp(void)
 	if ((ret = icm_45686_edmp_set_config_int_apex(icm, &apex_int_config))) {
 		goto err;
 	}
+	/* Arm GPIO before routing the eDMP event source to INT1. */
+	irq_armed = TRUE;
+	gpio_hal_intr_enable(ICM45686_INT1_CONT, ICM45686_INT1_PIN);
+	barrier();
+	int_cfg.edmp_event = ICM_45686_ENABLE;
+	if ((ret = icm_45686_set_config_int_source(icm, ICM_45686_INT1, &int_cfg))) {
+		goto err;
+	}
 	if ((ret = icm_45686_edmp_enable(icm))) {
 		goto err;
 	}
 	return ((gfp_t) wait_intr);
 err:
+	stats.edmp_init_err_cnt++;
 	msg(INF, "ICM45686: init_apex() error (%s)\n", hwerr_str(ret));
 	return ((gfp_t) state_error);
 }
@@ -332,22 +363,25 @@ static gfp_t wait_intr(void)
 	struct icm_45686_int_bitmap is;
 	icm_45686_edmp_int_state_t apex_state;
 
-	if (pdFALSE == xSemaphoreTake(isr_sig, ms_to_os_ticks(WAIT_ISR_SIG_TMO_MS))) {
+	if (xSemaphoreTake(isr_sig, ms_to_os_ticks(WAIT_ISR_SIG_TMO_MS)) == pdFALSE) {
 		return ((gfp_t) ping_icm);
 	}
 	if ((ret = icm_45686_get_int_status(icm, ICM_45686_INT1, &is))) {
+		stats.int_stat_err_cnt++;
 		msg(INF, "ICM45686: get_int_status() error (%s)\n", hwerr_str(ret));
 		goto err;
 	}
 	if (is.edmp_event) {
 		stats.edmp_event_cnt++;
 		if ((ret = icm_45686_edmp_get_int_apex_status(icm, &apex_state))) {
+			stats.apex_stat_err_cnt++;
 			msg(INF, "ICM45686: edmp_get_int_apex_status() error (%s)\n", hwerr_str(ret));
 			goto err;
 		}
 		if (apex_state.tap) {
 			icm_45686_edmp_tap_data_t tap_data;
 			if ((ret = icm_45686_edmp_get_tap_data(icm, &tap_data))) {
+				stats.tap_data_err_cnt++;
 				msg(INF, "ICM45686: edmp_get_tap_data() error (%s)\n", hwerr_str(ret));
 				goto err;
 			}
@@ -359,7 +393,7 @@ static gfp_t wait_intr(void)
 			} else {
 				set_ledui_led_state(LEDUI4, LEDUI_LED_OFF);
 				msg(INF, "ICM45686: SINGLE_TAP %c%c\n",
-				tap_dir_to_ch(tap_data.direction), tap_axis_to_ch(tap_data.axis));
+				    tap_dir_to_ch(tap_data.direction), tap_axis_to_ch(tap_data.axis));
 			}
 		} else {
 			stats.unkn_apex_intr_cnt++;
@@ -370,7 +404,6 @@ static gfp_t wait_intr(void)
 	gpio_hal_intr_enable(ICM45686_INT1_CONT, ICM45686_INT1_PIN);
 	return ((gfp_t) wait_intr);
 err:
-	gpio_hal_intr_enable(ICM45686_INT1_CONT, ICM45686_INT1_PIN);
 	return ((gfp_t) state_error);
 }
 
@@ -383,6 +416,7 @@ static gfp_t ping_icm(void)
 
 	ret = icm_45686_whoami_check(icm);
 	if (ret) {
+		stats.probe_err_cnt++;
 		msg(INF, "ICM45686: ping_icm() error (%s)\n", hwerr_str(ret));
 		return ((gfp_t) state_error);
 	}
@@ -395,21 +429,30 @@ static gfp_t ping_icm(void)
 static BaseType_t int1_isr_clbk(uint32_t status)
 {
 	BaseType_t tsk_wkn = pdFALSE;
+
+	if (!(status & ICM45686_INT1_PIN)) {
+		return (tsk_wkn);
+	}
+	if (!irq_armed) {
+		stats.stale_irq_cnt++;
+		return (tsk_wkn);
+	}
 #if ICM45686_INTR_TYPE == LOW_LEVEL_INTR_TYPE
-	if (status & ICM45686_INT1_PIN &&
-	    gpio_hal_is_intr_enabled(ICM45686_INT1_CONT, ICM45686_INT1_PIN) &&
-	    gpio_hal_get_input(ICM45686_INT1_CONT, ICM45686_INT1_PIN) == GPIO_HAL_LOW) {
+	if (!gpio_hal_is_intr_enabled(ICM45686_INT1_CONT, ICM45686_INT1_PIN)) {
+		return (tsk_wkn);
+	}
+	if (gpio_hal_get_input(ICM45686_INT1_CONT, ICM45686_INT1_PIN) == GPIO_HAL_LOW) {
 		gpio_hal_intr_disable(ICM45686_INT1_CONT, ICM45686_INT1_PIN);
 		xSemaphoreGiveFromISR(isr_sig, &tsk_wkn);
 	}
 #elif ICM45686_INTR_TYPE == FALL_EDGE_INTR_TYPE
-	if (status & ICM45686_INT1_PIN && gpio_hal_is_intr_enabled(ICM45686_INT1_CONT, ICM45686_INT1_PIN) &&
-	    gpio_hal_get_input(ICM45686_INT1_CONT, ICM45686_INT1_PIN) == GPIO_HAL_LOW) {
-		gpio_hal_intr_disable(ICM45686_INT1_CONT, ICM45686_INT1_PIN);
-		xSemaphoreGiveFromISR(isr_sig, &tsk_wkn);
+	if (gpio_hal_get_input(ICM45686_INT1_CONT, ICM45686_INT1_PIN) == GPIO_HAL_HIGH) {
+		stats.irq_pin_high_cnt++;
 	}
+	gpio_hal_intr_disable(ICM45686_INT1_CONT, ICM45686_INT1_PIN);
+	xSemaphoreGiveFromISR(isr_sig, &tsk_wkn);
 #else
- #error "ICM45686_INTR_TYPE unknown"
+#error "ICM45686_INTR_TYPE unknown"
 #endif
 	return (tsk_wkn);
 }
@@ -419,8 +462,12 @@ static BaseType_t int1_isr_clbk(uint32_t status)
  */
 static gfp_t state_error(void)
 {
+	gpio_hal_intr_disable(ICM45686_INT1_CONT, ICM45686_INT1_PIN);
+	irq_armed = FALSE;
 	msg(INF, "ICM45686: resetting state machine after error\n");
-	vTaskDelay(ms_to_os_ticks(RESET_STM_TMO_MS));
+#ifdef ICM45686_RESET_STM_TMO_MS
+	vTaskDelay(ms_to_os_ticks(ICM45686_RESET_STM_TMO_MS));
+#endif
 	stats.stm_rst_cnt++;
 	return ((gfp_t) state_sw_reset);
 }
@@ -448,14 +495,19 @@ static void cmd_icms(void)
 	msg(INF, cmd_accp);
 	msg(INF, "ICM45686 cnt: edmp_event=%u unkn_intr=%u unkn_apex_intr=%u\n",
 	    stats.edmp_event_cnt, stats.unkn_intr_cnt, stats.unkn_apex_intr_cnt);
-	msg(INF, "ICM45686 cnt: stm_rst=%u\n", stats.stm_rst_cnt);
+	msg(INF, "ICM45686 cnt: irq_pin_high=%u stale_irq=%u stm_rst=%u\n",
+	    stats.irq_pin_high_cnt, stats.stale_irq_cnt, stats.stm_rst_cnt);
+	msg(INF, "ICM45686 STM err: sw_reset=%u probe=%u cfg=%u edmp_init=%u\n",
+	    stats.sw_reset_err_cnt, stats.probe_err_cnt, stats.cfg_err_cnt, stats.edmp_init_err_cnt);
+	msg(INF, "ICM45686 STM err: int_stat=%u apex_stat=%u tap_data=%u\n",
+	    stats.int_stat_err_cnt, stats.apex_stat_err_cnt, stats.tap_data_err_cnt);
 	vTaskPrioritySet(NULL, pr);
 }
 
 /**
  * log_tap_config
  */
-static void log_tap_config(icm_45686_edmp_apex_parameters_t *ap)
+static void log_tap_config(const icm_45686_edmp_apex_parameters_t *ap)
 {
 	UBaseType_t pr;
 

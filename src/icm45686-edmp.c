@@ -20,6 +20,7 @@
 #include <gentyp.h>
 #include <stdint.h>
 #include "sysconf.h"
+#include "criterr.h"
 #include "dlycnt.h"
 #include "hwerr.h"
 #include "icm45686-edmp_def.h"
@@ -39,6 +40,9 @@ int icm_45686_edmp_set_frequency(icm_45686 s, enum icm_45686_dmp_ext_sen_odr_cfg
 	int status;
 	struct icm_45686_dmp_ext_sen_odr_cfg dmp_ext_sen_odr_cfg;
 
+	if ((unsigned int) frequency > ICM_45686_DMP_EXT_SEN_ODR_CFG_APEX_ODR_800_HZ) {
+		crit_err_exit(BAD_PARAMETER);
+	}
 	if ((status = icm_45686_bank0_read(s, ICM_45686_DMP_EXT_SEN_ODR_CFG, &dmp_ext_sen_odr_cfg, 1))) {
 		return (status);
 	}
@@ -156,7 +160,7 @@ int icm_45686_edmp_recompute_apex_decimation(icm_45686 s)
 	if ((status = icm_45686_bank0_write(s, ICM_45686_REG_HOST_MSG, &reg_host_msg, 1, TRUE))) {
 		return (status);
 	}
-	/* Wait 200 us to give enough time for EMDP to start running */
+	/* Wait 200 us to give eDMP enough time to start running. */
 	delay_us(200);
 	/* Wait for DMP execution to complete */
 	if ((status = icm_45686_edmp_wait_for_idle(s))) {
@@ -166,7 +170,9 @@ int icm_45686_edmp_recompute_apex_decimation(icm_45686 s)
 	if ((status = icm_45686_edmp_mask_int_src(s, ICM_45686_EDMP_INT0, ICM_45686_EDMP_INT_SRC_ON_DEMAND_MASK))) {
 		return (status);
 	}
-	/* Restore original DMP state, with DMP necessarily disabled as it was checked at the beginning of this function */
+	/*
+	 * Restore original DMP state, with DMP disabled as verified at entry.
+	 */
 	if ((status = icm_45686_bank0_write(s, ICM_45686_EDMP_APEX_EN0, &save_edmp_apex_en0, 1, TRUE))) {
 		return (status);
 	}
@@ -246,16 +252,19 @@ int icm_45686_edmp_get_apex_parameters(icm_45686 s, icm_45686_edmp_apex_paramete
 	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_R2W_MOTION_THR_TIMER_SLOW, &p->r2w_motion_th_timer_slow))) {
 		return (status);
 	}
-	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_R2W_MOTION_PREV_GRAVITY_TIMEOUT, &p->r2w_motion_prev_gravity_timeout))) {
+	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_R2W_MOTION_PREV_GRAVITY_TIMEOUT,
+	                                       &p->r2w_motion_prev_gravity_timeout))) {
 		return (status);
 	}
-	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_R2W_LAST_GRAVITY_MOTION_TIMER, &p->r2w_last_gravity_motion_timer))) {
+	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_R2W_LAST_GRAVITY_MOTION_TIMER,
+	                                       &p->r2w_last_gravity_motion_timer))) {
 		return (status);
 	}
 	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_R2W_LAST_GRAVITY_TIMEOUT, &p->r2w_last_gravity_timeout))) {
 		return (status);
 	}
-	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_R2W_GESTURE_VALIDITY_TIMEOUT, &p->r2w_gesture_validity_timeout))) {
+	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_R2W_GESTURE_VALIDITY_TIMEOUT,
+	                                       &p->r2w_gesture_validity_timeout))) {
 		return (status);
 	}
 	/* Freefall */
@@ -306,7 +315,8 @@ int icm_45686_edmp_get_apex_parameters(icm_45686 s, icm_45686_edmp_apex_paramete
 		return (status);
 	}
 	/* CalMag */
-	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_SOFT_IRON_SENSITIVITY_MATRIX, p->soft_iron_sensitivity_matrix))) {
+	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_SOFT_IRON_SENSITIVITY_MATRIX,
+	                                       p->soft_iron_sensitivity_matrix))) {
 		return (status);
 	}
 	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_HARD_IRON_OFFSET, p->hard_iron_offset))) {
@@ -326,7 +336,7 @@ int icm_45686_edmp_get_apex_parameters(icm_45686 s, icm_45686_edmp_apex_paramete
 /**
  * icm_45686_edmp_set_apex_parameters
  */
-int icm_45686_edmp_set_apex_parameters(icm_45686 s, icm_45686_edmp_apex_parameters_t *p)
+int icm_45686_edmp_set_apex_parameters(icm_45686 s, const icm_45686_edmp_apex_parameters_t *p)
 {
 	int status;
 	icm_45686_edmp_apex_enx_t cfg;
@@ -341,138 +351,149 @@ int icm_45686_edmp_set_apex_parameters(icm_45686 s, icm_45686_edmp_apex_paramete
 		return (-ENRDY);
 	}
 	/* Pedometer */
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_AMP_TH, (uint8_t *) &p->ped_amp_th))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_AMP_TH, &p->ped_amp_th))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_STEP_CNT_TH, (uint8_t *)&p->ped_step_cnt_th))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_STEP_CNT_TH, &p->ped_step_cnt_th))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_PREV_STEP_CNT_TH, (uint8_t *)&p->ped_step_cnt_th))) { /* same as step_cnt_th */
+	/* The previous-step threshold must use the same value as the step-count threshold. */
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_PREV_STEP_CNT_TH, &p->ped_step_cnt_th))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_STEP_DET_TH, (uint8_t *)&p->ped_step_det_th))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_STEP_DET_TH, &p->ped_step_det_th))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_SB_TIMER_TH, (uint8_t *)&p->ped_sb_timer_th))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_SB_TIMER_TH, &p->ped_sb_timer_th))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_HI_EN_TH, (uint8_t *)&p->ped_hi_en_th))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_HI_EN_TH, &p->ped_hi_en_th))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_SENSITIVITY_MODE, (uint8_t *)&p->ped_sensitivity_mode))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_SENSITIVITY_MODE, &p->ped_sensitivity_mode))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_LOW_EN_AMP_TH, (uint8_t *)&p->ped_low_en_amp_th))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_PED_LOW_EN_AMP_TH, &p->ped_low_en_amp_th))) {
 		return (status);
 	}
 	/* Tilt */
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_TILT_WAIT_TIME, (uint8_t *)&p->tilt_wait_time))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_TILT_WAIT_TIME, &p->tilt_wait_time))) {
 		return (status);
 	}
 #if ICM_45686_USE_BASIC_SMD == 1
 	/* Basic SMD */
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_BASICSMD_WIN, (uint8_t *)&p->basicsmd_win))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_BASICSMD_WIN, &p->basicsmd_win))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_BASICSMD_WIN_WAIT, (uint8_t *)&p->basicsmd_win_wait))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_BASICSMD_WIN_WAIT, &p->basicsmd_win_wait))) {
 		return (status);
 	}
 #else
 	/* SMD */
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_SMD_SENSITIVITY, (uint8_t *)&p->smd_sensitivity))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_SMD_SENSITIVITY, &p->smd_sensitivity))) {
 		return (status);
 	}
 #endif
 	/* R2W */
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_SLEEP_TIME_OUT, (uint8_t *)&p->r2w_sleep_time_out))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_SLEEP_TIME_OUT, &p->r2w_sleep_time_out))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_SLEEP_GESTURE_DELAY, (uint8_t *)&p->r2w_sleep_gesture_delay))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_SLEEP_GESTURE_DELAY,
+	                                        &p->r2w_sleep_gesture_delay))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_MOUNTING_MATRIX, (uint8_t *)&p->r2w_mounting_matrix))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_MOUNTING_MATRIX, &p->r2w_mounting_matrix))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_GRAVITY_FILTER_GAIN, (uint8_t *)&p->r2w_gravity_filter_gain))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_GRAVITY_FILTER_GAIN,
+	                                        &p->r2w_gravity_filter_gain))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_MOTION_THR_ANGLE_COSINE, (uint8_t *)&p->r2w_motion_th_angle_cosine))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_MOTION_THR_ANGLE_COSINE,
+	                                        &p->r2w_motion_th_angle_cosine))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_MOTION_THR_TIMER_FAST, (uint8_t *)&p->r2w_motion_th_timer_fast))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_MOTION_THR_TIMER_FAST,
+	                                        &p->r2w_motion_th_timer_fast))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_MOTION_THR_TIMER_SLOW, (uint8_t *)&p->r2w_motion_th_timer_slow))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_MOTION_THR_TIMER_SLOW,
+	                                        &p->r2w_motion_th_timer_slow))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_MOTION_PREV_GRAVITY_TIMEOUT, (uint8_t *)&p->r2w_motion_prev_gravity_timeout))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_MOTION_PREV_GRAVITY_TIMEOUT,
+	                                        &p->r2w_motion_prev_gravity_timeout))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_LAST_GRAVITY_MOTION_TIMER, (uint8_t *)&p->r2w_last_gravity_motion_timer))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_LAST_GRAVITY_MOTION_TIMER,
+	                                        &p->r2w_last_gravity_motion_timer))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_LAST_GRAVITY_TIMEOUT, (uint8_t *)&p->r2w_last_gravity_timeout))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_LAST_GRAVITY_TIMEOUT,
+	                                        &p->r2w_last_gravity_timeout))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_GESTURE_VALIDITY_TIMEOUT, (uint8_t *)&p->r2w_gesture_validity_timeout))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_R2W_GESTURE_VALIDITY_TIMEOUT,
+	                                        &p->r2w_gesture_validity_timeout))) {
 		return (status);
 	}
 	/* Free Fall */
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_LOWG_PEAK_TH, (uint8_t *)&p->lowg_peak_th))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_LOWG_PEAK_TH, &p->lowg_peak_th))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_LOWG_PEAK_TH_HYST, (uint8_t *)&p->lowg_peak_th_hyst))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_LOWG_PEAK_TH_HYST, &p->lowg_peak_th_hyst))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_LOWG_TIME_TH, (uint8_t *)&p->lowg_time_th))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_LOWG_TIME_TH, &p->lowg_time_th))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_HIGHG_PEAK_TH, (uint8_t *)&p->highg_peak_th))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_HIGHG_PEAK_TH, &p->highg_peak_th))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_HIGHG_PEAK_TH_HYST, (uint8_t *)&p->highg_peak_th_hyst))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_HIGHG_PEAK_TH_HYST, &p->highg_peak_th_hyst))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_HIGHG_TIME_TH, (uint8_t *)&p->highg_time_th))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_HIGHG_TIME_TH, &p->highg_time_th))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_FF_MIN_DURATION, (uint8_t *)&p->ff_min_duration))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_FF_MIN_DURATION, &p->ff_min_duration))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_FF_MAX_DURATION, (uint8_t *)&p->ff_max_duration))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_FF_MAX_DURATION, &p->ff_max_duration))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_FF_DEBOUNCE_DURATION, (uint8_t *)&p->ff_debounce_duration))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_FF_DEBOUNCE_DURATION, &p->ff_debounce_duration))) {
 		return (status);
 	}
 	/* Tap */
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_TAP_MIN_JERK, (uint8_t *)&p->tap_min_jerk))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_TAP_MIN_JERK, &p->tap_min_jerk))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_TAP_TMAX, (uint8_t *)&p->tap_tmax))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_TAP_TMAX, &p->tap_tmax))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_TAP_TMIN, (uint8_t *)&p->tap_tmin))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_TAP_TMIN, &p->tap_tmin))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_TAP_MAX_PEAK_TOL, (uint8_t *)&p->tap_max_peak_tol))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_TAP_MAX_PEAK_TOL, &p->tap_max_peak_tol))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_TAP_SMUDGE_REJECT_THR, (uint8_t *)&p->tap_smudge_reject_th))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_TAP_SMUDGE_REJECT_THR, &p->tap_smudge_reject_th))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_TAP_TAVG, (uint8_t *)&p->tap_tavg))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_TAP_TAVG, &p->tap_tavg))) {
 		return (status);
 	}
 	/* CalMag */
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_SOFT_IRON_SENSITIVITY_MATRIX, (uint8_t *)p->soft_iron_sensitivity_matrix))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_SOFT_IRON_SENSITIVITY_MATRIX,
+	                                        p->soft_iron_sensitivity_matrix))) {
 		return (status);
 	}
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_HARD_IRON_OFFSET, (uint8_t *)p->hard_iron_offset))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_HARD_IRON_OFFSET, p->hard_iron_offset))) {
 		return (status);
 	}
 	/* Power save */
-	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_POWER_SAVE_TIME, (uint8_t *) &p->power_save_time))) {
+	if ((status = ICM_45686_WRITE_EDMP_SRAM(s, EDMP_POWER_SAVE_TIME, &p->power_save_time))) {
 		return (status);
 	}
 	if ((status = icm_45686_bank0_read(s, ICM_45686_EDMP_APEX_EN1, &cfg.edmp_apex_en1, 1))) {
@@ -574,15 +595,8 @@ int icm_45686_edmp_disable(icm_45686 s)
 	return (icm_45686_bank0_write(s, ICM_45686_EDMP_APEX_EN1, &edmp_apex_en1, 1, TRUE));
 }
 
-/*
+/**
  * check_dmp_odr_decimation
- *
- * Check if icm_45686_edmp_set_frequency() was called without recomputing APEX decimation
- * thanks to icm_45686_edmp_recompute_apex_decimation().
- * This function will compare edmp decimation rate in ICM SRAM as computed at APEX init step vs the
- * DMP ODR currently written in ICM register.
- * Returns -ENRDY if icm_45686_edmp_recompute_apex_decimation() should have been
- * called.
  */
 static int check_dmp_odr_decimation(icm_45686 s)
 {
@@ -591,7 +605,10 @@ static int check_dmp_odr_decimation(icm_45686 s)
 	struct icm_45686_dmp_ext_sen_odr_cfg dmp_ext_sen_odr_cfg;
 	enum icm_45686_dmp_ext_sen_odr_cfg_apex_odr apex_odr;
 
-	// edmp decimation rate address in SRAM is 0x460
+	/*
+	 * Compare the SRAM decimation setting at 0x460 with the configured DMP ODR.
+	 * A mismatch means that APEX decimation must be recomputed.
+	 */
 	if ((status = icm_45686_ireg_read(s, 0x460, &dmp_decim_rate_from_sram, 1))) {
 		return (status);
 	}
@@ -600,38 +617,38 @@ static int check_dmp_odr_decimation(icm_45686 s)
 	}
 	apex_odr = (enum icm_45686_dmp_ext_sen_odr_cfg_apex_odr) dmp_ext_sen_odr_cfg.apex_odr;
 	switch (dmp_decim_rate_from_sram) {
-	case 15:
+	case 15 :
 		if (apex_odr == ICM_45686_DMP_EXT_SEN_ODR_CFG_APEX_ODR_800_HZ) {
 			return (0);
 		} else {
 			return (-ENRDY);
 		}
-	case 7:
+	case 7 :
 		if (apex_odr == ICM_45686_DMP_EXT_SEN_ODR_CFG_APEX_ODR_400_HZ) {
 			return (0);
 		} else {
 			return (-ENRDY);
 		}
-	case 3:
+	case 3 :
 		if (apex_odr == ICM_45686_DMP_EXT_SEN_ODR_CFG_APEX_ODR_200_HZ) {
 			return (0);
 		} else {
 			return (-ENRDY);
 		}
-	case 1:
+	case 1 :
 		if (apex_odr == ICM_45686_DMP_EXT_SEN_ODR_CFG_APEX_ODR_100_HZ) {
 			return (0);
 		} else {
 			return (-ENRDY);
 		}
-	case 0:
+	case 0 :
 		if ((apex_odr == ICM_45686_DMP_EXT_SEN_ODR_CFG_APEX_ODR_50_HZ) ||
 		    (apex_odr == ICM_45686_DMP_EXT_SEN_ODR_CFG_APEX_ODR_25_HZ)) {
 			return (0);
 		} else {
 			return (-ENRDY);
 		}
-	default:
+	default :
 		return (-EHW);
 	}
 }
@@ -961,7 +978,7 @@ int icm_45686_edmp_get_ff_data(icm_45686 s, uint16_t *freefall_duration)
 	host_rptr = apex_buffer_mgmt.ff_duration_host_rptr;
 	edmp_wptr = apex_buffer_mgmt.ff_duration_edmp_wptr;
 	if (host_rptr == edmp_wptr) {
-		return (-EDATA); // No data.
+		return (-EDATA);
 	}
 	if ((host_rptr & 0x1) == 0) {
 		if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_FF_DURATION_BUF1, data))) {
@@ -987,17 +1004,21 @@ int icm_45686_edmp_get_ff_data(icm_45686 s, uint16_t *freefall_duration)
 int icm_45686_edmp_get_tap_data(icm_45686 s, icm_45686_edmp_tap_data_t *data)
 {
 	int status;
+	uint8_t value;
 	uint8_t tap_duration = 0;
 
-	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_TAP_NUM, &data->num))) {
+	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_TAP_NUM, &value))) {
 		return (status);
 	}
-	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_TAP_AXIS, &data->axis))) {
+	data->num = (icm_45686_edmp_tap_num_t) value;
+	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_TAP_AXIS, &value))) {
 		return (status);
 	}
-	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_TAP_DIR, &data->direction))) {
+	data->axis = (icm_45686_edmp_tap_axis_t) value;
+	if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_TAP_DIR, &value))) {
 		return (status);
 	}
+	data->direction = (icm_45686_edmp_tap_dir_t) value;
 	if (data->num == ICM_45686_EDMP_TAP_DOUBLE) {
 		if ((status = ICM_45686_READ_EDMP_SRAM(s, EDMP_DOUBLE_TAP_TIMING, &tap_duration))) {
 			return (status);
@@ -1018,6 +1039,9 @@ int icm_45686_edmp_mask_int_src(icm_45686 s, icm_45686_edmp_int_t edmp_int_nb, u
 	uint32_t reg_addr;
 	uint8_t reg;
 
+	if ((unsigned int) edmp_int_nb > ICM_45686_EDMP_INT2) {
+		crit_err_exit(BAD_PARAMETER);
+	}
 	/*
 	 * Interrupt mask register for EDMP interrupts are located in 3 consecutive
 	 * registers starting with ICM_45686_STATUS_MASK_PIN_0_7 for interrupt0.
@@ -1040,6 +1064,9 @@ int icm_45686_edmp_unmask_int_src(icm_45686 s, icm_45686_edmp_int_t edmp_int_nb,
 	uint32_t reg_addr;
 	uint8_t reg;
 
+	if ((unsigned int) edmp_int_nb > ICM_45686_EDMP_INT2) {
+		crit_err_exit(BAD_PARAMETER);
+	}
 	/*
 	 * Interrupt mask register for EDMP interrupts are located in 3 consecutive
 	 * registers starting with STATUS_MASK_PIN_0_7 for interrupt0.
@@ -1062,6 +1089,7 @@ int icm_45686_edmp_configure(icm_45686 s)
 	uint16_t start_addr[] = {EDMP_ROM_START_ADDR_IRQ0, EDMP_ROM_START_ADDR_IRQ1, EDMP_ROM_START_ADDR_IRQ2};
 	/* Only 8 MSB of SP address is written to register */
 	uint8_t stack_addr = (uint8_t) (APEX_FEATURE_STACK_END >> 8);
+
 	/* Set Start address for 3 edmp IRQ handlers */
 	if ((status = icm_45686_ireg_write(s, ICM_45686_EDMP_PRGRM_IRQ0_0, &start_addr[0], sizeof(start_addr)))) {
 		return (status);
@@ -1088,7 +1116,11 @@ int icm_45686_edmp_run_ondemand(icm_45686 s, icm_45686_edmp_int_t edmp_int_nb)
 		return (status);
 	}
 	reg_host_msg.edmp_on_demand_en = ICM_45686_ENABLE;
-	return (icm_45686_bank0_write(s, ICM_45686_REG_HOST_MSG, &reg_host_msg, 1, TRUE));
+	if ((status = icm_45686_bank0_write(s, ICM_45686_REG_HOST_MSG, &reg_host_msg, 1, TRUE))) {
+		return (status);
+	}
+	delay_us(200);
+	return (0);
 }
 
 /**

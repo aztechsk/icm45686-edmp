@@ -68,7 +68,8 @@
 
 /* ped_prev_step_cnt_th
  *
- * Intermediate number of steps needed to be buffered waiting the internal counting reached the ped_step_cnt_th (when ped_prev_step_cnt_th is lower than ped_step_cnt_th).
+ * Intermediate number of steps needed to be buffered waiting the internal counting reached the ped_step_cnt_th (when
+ * ped_prev_step_cnt_th is lower than ped_step_cnt_th).
  * Note: as soon as ped_step_cnt_th is reached ped_prev_step_cnt_th value is set to ped_step_cnt_th.
  * Unit: number of steps
  * Range: [0-15]
@@ -93,11 +94,13 @@
 /* ped_sb_timer_th
  *
  * Maximum permitted time between two consecutive steps.
- * While in the step buffer state, the step buffer count resets to 0 if a new step isn't detected for this amount of time (user is considered to have "stopped walking")
+ * While in the step buffer state, the step buffer count resets to 0 if a new step isn't detected for this amount of
+ * time (user is considered to have "stopped walking")
  * Unit: time in samples number
  * Range: [0 - 225]
  * Default value: 150 for ODR = 50 Hz
- * Recommendation: it is linked to stop and go use case to avoid seeing the impact of pedo_step_cnt_thr and pedo_step_det_thr
+ * Recommendation: it is linked to stop and go use case to avoid seeing the impact of pedo_step_cnt_thr and
+ * pedo_step_det_thr
  */
 #define EDMP_PED_SB_TIMER_TH                                    0x3e2
 #define EDMP_PED_SB_TIMER_TH_SIZE                               2
@@ -154,8 +157,9 @@
 
 /* ped_step_cadence
  *
- * Instant step cadence measured by the algorithm
- * Unit: 4*number of samples between two consecutive steps. Cadency (step/s) = (ped_step_cadence / 4) / (pedometer_ ODR).
+ * Encoded time between steps: four units per pedometer sample (unsigned Q6.2).
+ * Step interval (s) = (ped_step_cadence / 4) / PEDOMETER_ODR_Hz.
+ * Cadence (steps/s) = 4 * PEDOMETER_ODR_Hz / ped_step_cadence (when nonzero).
  */
 #define EDMP_PED_STEP_CADENCE                                   0x9f
 #define EDMP_PED_STEP_CADENCE_SIZE                              1
@@ -190,7 +194,8 @@
 
 /* quat_reset_en
  *
- * Set 1 to force reset 3-axis quaternion when next tilt reset is done. This is applicable only if tilt_reset_en is also set to 1.
+ * Set 1 to force reset 3-axis quaternion when next tilt reset is done. This is applicable only if tilt_reset_en is also
+ * set to 1.
  * Unit: N/A
  * Range: [0 - 1]
  * Default: 0
@@ -269,7 +274,8 @@
 
 /* r2w_gravity_filter_gain
  *
- * Gain used to filter the accelerometer to obtain an estimation of the gravity (low-pass filter), defined as : forgetting factor = Gain * SAMPLING_PERIOD / (40 * 32), and 100Hz.
+ * Gain used to filter the accelerometer to obtain an estimation of the gravity (low-pass filter), defined as :
+ * forgetting factor = Gain * SAMPLING_PERIOD / (40 * 32), and 100Hz.
  * Range: [2-16]
  * Default: 6 for ODR = 50Hz, 8 for ODR = 25Hz
  */
@@ -288,7 +294,8 @@
 
 /* r2w_motion_thr_timer_fast
  *
- * Timer relative to the rapidity of the algorithm to trigger wake up when the orientation before motion is Y axis up (with less than 30 degrees of inclination).
+ * Timer relative to the rapidity of the algorithm to trigger wake up when the orientation before motion is Y axis up
+ * (with less than 30 degrees of inclination).
  * Unit: ms (no dependency on ODR, it is managed internally by the algorithm)
  * Range: [100 - 500]
  * Default: 240
@@ -298,7 +305,8 @@
 
 /* r2w_motion_thr_timer_slow
  *
- * Timer relative to the rapidity of the algorithm to trigger wake up when the orientation before motion is over 30 degrees on the Y axis
+ * Timer relative to the rapidity of the algorithm to trigger wake up when the orientation before motion is over 30
+ * degrees on the Y axis
  * Unit: ms (no dependency on ODR, it is managed internally by the algorithm)
  * Range: [240- 1000]
  * Default: 500
@@ -329,7 +337,8 @@
 
 /* r2w_last_gravity_timeout
  *
- * Time delay to update gravity in case motion is detected all the time, force to update gravity estimator even if the device is not stable.
+ * Time delay to update gravity in case motion is detected all the time, force to update gravity estimator even if the
+ * device is not stable.
  * Unit: ms (no dependency on ODR, it is managed internally by the algorithm)
  * Range: [1000 - 10000]
  * Default: 2600
@@ -429,7 +438,8 @@
 
 /* ff_debounce_duration
  *
- * Period after a freefall is signaled during which a new freefall will not be detected. Prevents false detection due to bounces.
+ * Period after a freefall is signaled during which a new freefall will not be detected. Prevents false detection due to
+ * bounces.
  * Unit: time in samples number
  * Range: [75 - 3000]
  * Default: 800 (set for default ODR = 800 Hz, equivalent to 1 s)
@@ -497,9 +507,10 @@
 
 /* tap_smudge_reject_thr
  *
- * max acceptable number of samples (jerk value) over  tap_max_peak_tol the during the Tmin window. Over this value, Tap event is rejected
+ * max acceptable number of samples (jerk value) over  tap_max_peak_tol the during the Tmin window. Over this value, Tap
+ * event is rejected
  * unit: time in number of samples
- * range: [13 Ă˘â‚¬â€ś 92]
+ * range: [13 - 92]
  * Default: 17 (set for default ODR = 200 Hz, equivalent to 0.085 s)
  */
 #define EDMP_TAP_SMUDGE_REJECT_THR                              0x194
@@ -534,15 +545,17 @@
 
 /* tap_dir
  *
- * Indicate the direction of the tap in the device frame
- * 0: positive, 1: negative
+ * Tap direction in device frame, as decoded by the TDK reference C driver:
+ * 0: negative, 1: positive.
  */
 #define EDMP_TAP_DIR                                            0x8f
 #define EDMP_TAP_DIR_SIZE                                       1
 
 /* double_tap_timing
  *
- * Number of samples between the two detected pulses right shifted by 4 (therefore, under 15 samples, value will be clamped to 0). Double tap timing in seconds is 16 * double_tap_timing / ACCEL_ODR_Hz.
+ * Number of 16-sample intervals between two detected tap pulses.
+ * The driver converts the raw byte to samples by multiplying it by 16.
+ * Time (s) = (DOUBLE_TAP_TIMING * 16) / ACCEL_ODR_Hz.
  */
 #define EDMP_DOUBLE_TAP_TIMING                                  0x90
 #define EDMP_DOUBLE_TAP_TIMING_SIZE                             1
@@ -595,14 +608,9 @@
 
 /* stc_results
  *
- * Results/status from self-test run
- * bit0: AX Self-test result (0:pass 1:fail)
- * bit1: AY Self-test result (0:pass 1:fail)
- * bit2: AZ Self-test result (0:pass 1:fail)
- * bit3: GX Self-test result (0:pass 1:fail)
- * bit4: GY Self-test result (0:pass 1:fail)
- * bit5: GZ Self-test result (0:pass 1:fail)
- * bit6~7: Self-test status (0:Done 1:InProgress 2:Error)
+ * Self-test output flags (DS-000577, IMEM_SRAM_REG_68).
+ * bits 0..5: AX, AY, AZ, GX, GY, GZ (1: pass, 0: fail).
+ * bits 6..7: status (0: done, 1: in progress, 2: error, 3: reserved).
  */
 #define EDMP_STC_RESULTS                                        0x44
 #define EDMP_STC_RESULTS_SIZE                                   4

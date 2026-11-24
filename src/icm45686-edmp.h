@@ -328,6 +328,9 @@ int icm_45686_edmp_enable_pedometer(icm_45686 s);
 int icm_45686_edmp_disable_pedometer(icm_45686 s);
 
 /** @brief  Enable APEX algorithm Significant Motion Detection.
+ *  @note Standard SMD uses pedometer internals without enabling pedometer events.
+ *        Basic SMD (ICM_45686_USE_BASIC_SMD == 1) requires the caller to configure
+ *        and enable WOM first. This function only sets the selected SMD enable bit.
  *  @param[in] s  Pointer to device.
  *  @return       0 on success
  *                -ENRDY if user should have called `icm_45686_edmp_recompute_apex_decimation()`,

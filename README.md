@@ -5,9 +5,9 @@ Embedded C extension for the TDK InvenSense ICM-45686 embedded Digital Motion Pr
 for SPI, register access, reset and the physical interrupt interface.
 
 The library provides a configurable eDMP/APEX low-level (LL) API and one optional FreeRTOS
-tap-detection state machine (STM). The LL API exposes multiple APEX features; the supplied
-STM intentionally enables **only single- and double-tap detection** with a fixed acquisition
-sequence and client-configured tap thresholds.
+APEX state machine (STM). The LL API exposes multiple APEX features; the supplied
+STM always enables **single- and double-tap detection** and can independently enable
+**SMD and Tilt** through client compile-time settings.
 
 ## Features
 
@@ -17,7 +17,7 @@ sequence and client-configured tap thresholds.
 - APEX interrupt masking, status reading and physical INT1/INT2 routing through the base LL
 - Pedometer results, buffered free-fall duration and single/double-tap details
 - Internal eDMP IRQ0/IRQ1/IRQ2 source masking and on-demand execution
-- Optional FreeRTOS STM for continuous, INT1-driven tap detection
+- Optional FreeRTOS STM for INT1-driven TAP, SMD and Tilt detection
 - GPIO edge/level interrupt modes, recovery and per-cause diagnostic counters in the STM
 
 ## Files
@@ -27,7 +27,7 @@ sequence and client-configured tap thresholds.
 | `src/icm45686-edmp.c` | eDMP/APEX initialization, configuration, algorithms and results |
 | `src/icm45686-edmp.h` | Public LL API, APEX parameter and result types, calling contracts |
 | `src/icm45686-edmp_def.h` | eDMP SRAM addresses, sizes and parameter documentation |
-| `src/icm45686_stm_edmp.c` | FreeRTOS INT1 tap-detection STM and diagnostic command |
+| `src/icm45686_stm_edmp.c` | FreeRTOS INT1 TAP/SMD/Tilt STM and diagnostic command |
 | `src/icm45686_stm_edmp.h` | STM startup, configuration, IRQ, recovery and diagnostics documentation |
 
 ## Using the eDMP/APEX low-level API
@@ -75,8 +75,9 @@ Neither operation preserves an arbitrary prior internal eDMP interrupt mask.
 
 Each algorithm has a corresponding disable function. Enable/disable functions change
 feature bits; they do not themselves configure accelerometer power, eDMP execution or
-physical interrupt routing. `ICM_45686_USE_BASIC_SMD` (default `0`) selects the SMD
-variant and associated parameter layout when the LL is compiled.
+physical interrupt routing. `ICM_45686_USE_BASIC_SMD` must be defined as `0` or `1`
+when the LL is compiled and selects the SMD variant and associated parameter layout.
+Basic SMD requires the caller to configure and enable WOM before enabling SMD.
 
 `icm_45686_edmp_get_int_apex_status()` reads and clears the APEX status registers.
 `icm_45686_edmp_set_config_int_apex()` unmasks selected APEX events when their structure
@@ -100,12 +101,12 @@ The LL also exposes direct eDMP SRAM read/write macros, `icm_45686_edmp_configur
 internal on-demand execution and `icm_45686_edmp_wait_for_idle()`. They are intended
 for callers that manage the complete initialization and interrupt sequences themselves.
 
-## Using the tap-detection state machine
+## Using the APEX state machine
 
 Select `ICM45686_APEX_MODE` using `ICM45686_SENSOR_MODE` in the parent project's
 `sysconf.h`, and call `init_icm45686_stm_edmp()` **once** during startup. The function
 creates the SPI descriptor, binary semaphore, `icms` command and FreeRTOS task.
-The task then resets and configures the sensor and processes continuous eDMP tap events.
+The task then resets and configures the sensor and processes continuous eDMP APEX events.
 The same sensor must not be controlled concurrently from application LL code.
 
 ### Fixed STM sensor configuration
@@ -115,17 +116,17 @@ The same sensor must not be controlled concurrently from application LL code.
 | SPI | Bus 0, mode 0, 8-bit, 12 MHz, CSEL2; 20 ns CS setup; no CS rise between segments |
 | Accelerometer | Low-Noise, 400 or 800 Hz (compile-time), UI LPF ODR/4 |
 | Gyroscope and FIFO | Not used |
-| eDMP | APEX initialized; decimation recomputed; tap enabled, other algorithms disabled |
+| eDMP | APEX initialized; decimation recomputed; TAP enabled, SMD/Tilt optional |
 | INT1 | Active LOW, push-pull; eDMP event source, pulse/edge or latch/level |
 | Acquisition wait | Binary semaphore, 200 ms timeout |
 | Timeout fallback | WHO_AM_I check; absence of taps is not an error |
-| Tap output | `msg()` single/double-tap text; LEDUI4 OFF/ON respectively |
+| Event output | Independently routed TAP/SMD/Tilt text and optional binary event callback |
 | Recovery | INT1 mask/disarm, semaphore drain, reset and reconfigure; optional retry backoff |
 
-The task uses no sensor FIFO, raw accel/gyro measurement reports, application callbacks
-or internal delivery queue. There is no watchdog for time without a tap: the sensor can
-correctly remain motionless indefinitely. A successful 200 ms wait timeout simply leads
-to the WHO_AM_I check and another wait.
+The task uses no sensor FIFO, raw accel/gyro measurement reports or internal delivery
+queue. There is no watchdog for time without an event: the sensor can correctly remain
+motionless indefinitely. A successful 200 ms wait timeout simply leads to the WHO_AM_I
+check and another wait.
 
 ### TAP configuration and physical time
 
@@ -154,6 +155,114 @@ The multiplication precedes integer division, as in the STM implementation. For
 a single tap, no interval is reported. The direction symbol `+`/`-` follows the TDK
 reference C driver rather than the conflicting polarity description in DS-000577.
 
+### SMD and Tilt configuration
+
+When an algorithm is enabled, its applicable parameters must be defined in
+`sysconf.h`. Active settings are validated at compile time, programmed before
+algorithm activation and logged during eDMP initialization. Disabled algorithms
+retain their initialization defaults.
+
+| Macro | Meaning | Allowed values | TDK default |
+| --- | --- | --- | --- |
+| `ICM45686_APEX_SMD_SENSITIVITY` | Standard SMD rejection tuning (lower = higher detection rate) | 0..4 | 0 |
+| `ICM45686_APEX_BASICSMD_WIN` | Basic SMD continuous WOM window (samples) | 25..500 | 150 |
+| `ICM45686_APEX_BASICSMD_WIN_WAIT` | Basic SMD post-WOM window (samples) | 25..500 | 50 |
+| `ICM45686_APEX_TILT_WAIT_TIME` | Minimum tilt duration (samples at 50 Hz) | 0..65535 | 200 |
+
+Standard SMD retains the default pedometer parameters. Basic SMD window and WOM
+settings apply only when SMD is enabled and `ICM_45686_USE_BASIC_SMD == 1`.
+Tilt uses 50 Hz at either supported STM ODR, so 200 samples represent 4000 ms.
+AN-000478 lists 65536 as the upper limit, but the parameter is a 16-bit field;
+65535 is the largest representable value.
+
+#### Basic SMD WOM configuration
+
+| Macro | Meaning | Allowed values | TDK example |
+| --- | --- | --- | --- |
+| `ICM45686_APEX_BASICSMD_WOM_X_THR` | X-axis WOM threshold (1g/256) | 0..255 | 6 |
+| `ICM45686_APEX_BASICSMD_WOM_Y_THR` | Y-axis WOM threshold (1g/256) | 0..255 | 6 |
+| `ICM45686_APEX_BASICSMD_WOM_Z_THR` | Z-axis WOM threshold (1g/256) | 0..255 | 6 |
+
+All three thresholds are required for enabled Basic SMD and checked at compile time.
+One LSB is 1g/256 (about 3.906 mg), independent of accelerometer full scale;
+6 corresponds to about 23.4 mg. Lower thresholds make WOM more sensitive.
+The STM follows TDK's `examples/edmp_apex/edmp_apex.c`: compare consecutive
+samples, combine the three axes with OR and use the first over-threshold event.
+After accelerometer startup it writes the thresholds and enables WOM before
+activating Basic SMD. Initialization is repeated after each sensor reset/recovery.
+The STM keeps direct WOM interrupt sources masked on INT1 and INT2 (reset defaults
+for INT2); only the eDMP event is routed to INT1. WOM supplies Basic SMD internally,
+not MCU wake-up or APEX power save. Standard SMD and disabled SMD leave WOM off.
+
+Example Basic SMD settings in `sysconf.h`:
+
+```c
+#define ICM_45686_USE_BASIC_SMD		1
+#define ICM45686_APEX_SMD_ENABLE		1
+#define ICM45686_APEX_BASICSMD_WIN	150
+#define ICM45686_APEX_BASICSMD_WIN_WAIT	50
+#define ICM45686_APEX_BASICSMD_WOM_X_THR	6
+#define ICM45686_APEX_BASICSMD_WOM_Y_THR	6
+#define ICM45686_APEX_BASICSMD_WOM_Z_THR	6
+```
+
+TAP, optional Tilt and the selected 400/800 Hz Low-Noise accelerometer mode
+are unchanged. A Basic SMD event uses the same `SMD` report and counter as
+standard SMD. For tuning, see AN-000478 section 4.5 and the reference example.
+
+### Event reporting and application callbacks
+
+The text report is routed independently for each algorithm, like the base ICM-45686
+REGS/FIFO STM. The existing text is unchanged (including the trailing newline).
+
+| Macro | Values | Default |
+| --- | --- | --- |
+| `ICM45686_REPORT_APEX_TAP` | 0=off, 1=msg(), 2=callback, 3=both | 1 |
+| `ICM45686_REPORT_APEX_SMD` | 0=off, 1=msg(), 2=callback, 3=both | 1 |
+| `ICM45686_REPORT_APEX_TILT` | 0=off, 1=msg(), 2=callback, 3=both | 1 |
+| `ICM45686_REPORT_FN` | 0/1, enable text callback API | 0 |
+| `ICM45686_REPORT_EVENT_FN` | 0/1, enable binary event callback API | 0 |
+
+For example, to report to both local and remote destinations and deliver binary events:
+
+```c
+#define ICM45686_REPORT_APEX_TAP		3
+#define ICM45686_REPORT_APEX_SMD		3
+#define ICM45686_REPORT_APEX_TILT	3
+#define ICM45686_REPORT_FN		1
+#define ICM45686_REPORT_EVENT_FN	1
+```
+
+Include `sysconf.h` before `icm45686_stm_edmp.h`. Register callbacks during initialization,
+before acquisition starts:
+
+```c
+icm45686_stm_set_report_fn(report_fn);
+icm45686_stm_set_event_fn(event_fn);
+init_icm45686_stm_edmp();
+```
+
+The signatures are `boolean_t report_fn(const char *)` and
+`boolean_t event_fn(const struct icm45686_apex_event *)`.
+Each binary event has a recognized event sequence, type (1=single tap, 2=double tap,
+3=SMD, 4=Tilt), tap axis/direction and double-tap interval in ms (zero for other events).
+The sequence is 1-based, wraps modulo 2^32 and continues across recovery; it counts
+recognized events whether or not callbacks are registered. One wakeup can yield multiple
+callbacks (TAP, SMD, Tilt in that order). Binary reporting precedes text reporting for
+that event and is independent of text routing. An unregistered callback is skipped.
+The event structure contains fixed-width host values, not a packed wire protocol;
+serialize fields explicitly for network transmission. Both callbacks are synchronous
+in the acquisition task. The text buffer (64 bytes, static) and event pointer are only
+valid during their respective calls; copy data before returning. Keep callbacks bounded
+and nonblocking (e.g. copy to an application queue with zero wait) to avoid delaying
+subsequent event handling. GPIO INT1 is normally masked during event handling, but in
+falling-edge mode a pending semaphore signal may be processed with INT1 enabled.
+Returning `FALSE` counts a delivery failure, not a sensor failure; no recovery or retry
+is triggered. Passing `NULL` clears a callback
+when acquisition is not concurrently invoking it. Startup/configuration, errors and
+`icms` diagnostics remain local `msg()` output. Reporting options do not change sensor
+configuration or enable algorithms.
+
 ## Build-time configuration (`sysconf.h` and `board.h`)
 
 | Setting | Meaning |
@@ -166,9 +275,22 @@ reference C driver rather than the conflicting polarity description in DS-000577
 | `ICM45686_RESET_STM_TMO_MS` | Optional recovery delay in milliseconds |
 | `ICM45686_PADS_SPI_SLEW` | Sensor SPI pad slew selector after reset |
 | `ICM45686_APEX_TAP_*` | Six tap parameters in the table above |
-| `ICM_45686_USE_BASIC_SMD` | LL SMD variant, default `0`; SMD is disabled in this STM |
+| `ICM45686_APEX_SMD_ENABLE` | Required 0 or 1; enables standard/Basic SMD using LL-selected variant |
+| `ICM45686_APEX_TILT_ENABLE` | Required 0 or 1; enables tilt detection |
+| `ICM45686_APEX_SMD_SENSITIVITY` / `ICM45686_APEX_BASICSMD_*` | Required for the enabled SMD variant |
+| `ICM45686_APEX_TILT_WAIT_TIME` | Required when Tilt is enabled |
+| `ICM_45686_USE_BASIC_SMD` | Required LL SMD variant: `0` standard, `1` Basic SMD |
+| `ICM45686_REPORT_APEX_TAP` / `_SMD` / `_TILT` | Text routing selectors, 0..3 (default 1) |
+| `ICM45686_REPORT_FN` / `ICM45686_REPORT_EVENT_FN` | Optional text/binary callback API, 0 or 1 (default 0) |
 | `ICM45686_CS_CONT_ID` / `ICM45686_CS_PIN_ID` | SPI chip-select controller and pin mask |
 | `ICM45686_INT1_CONT` / `ICM45686_INT1_PIN` | INT1 GPIO controller and pin mask |
+
+TAP remains enabled regardless of the SMD/Tilt settings. The optional algorithms use
+the client-defined parameters described above when enabled. The STM reads both APEX status
+registers in one transaction and handles TAP, SMD and Tilt flags independently;
+one INT1 wakeup may report multiple events. Standard SMD uses pedometer internals
+and does not require `PEDO_EN` to be set; Basic SMD uses WOM. This STM leaves
+pedometer event output disabled.
 
 The APEX ODR selector uses client-defined numeric constants; the implementation rejects
 other selections. `ICM45686_RESET_STM_TMO_MS` is **optional**: when absent, recovery
@@ -188,9 +310,11 @@ sensor event source and enabling the eDMP processor. Recovery masks INT1, disarm
 ISR and drains any old binary-semaphore signal on the next reset. This follows the
 interrupt-lifetime model used by the base ICM-45686 FIFO STM.
 
-The base module's `ICM45686_REPORT_*` switches and `ICM45686_FIFO_HIRES` do **not**
-control this STM. To change the hard-coded SPI parameters, LPF, physical routing,
-algorithm selection or output mechanism, modify `icm45686_stm_edmp.c` and rebuild.
+The base module's REGS/FIFO measurement-routing switches, `ICM45686_REPORT_SAMPLE_FN`,
+`ICM45686_REPORT_MSG_NUM` and `ICM45686_FIFO_HIRES` do **not** control this STM.
+`ICM45686_REPORT_FN` is shared with the base STM modes. To change the hard-coded SPI
+parameters, LPF, physical routing or additional algorithms, modify `icm45686_stm_edmp.c`
+and rebuild.
 
 ## Errors and diagnostics
 
@@ -200,11 +324,14 @@ its ISR, optionally waits for `ICM45686_RESET_STM_TMO_MS`, then resets and reini
 the sensor. Task/semaphore allocation failures during initial startup call
 `crit_err_exit()`. There is no application callback for failed reads.
 
-The `icms` command provides two normal diagnostic lines:
+The `icms` command provides normal diagnostic lines:
 
 - `edmp_event`: INT1 status indicated an eDMP event; not necessarily a confirmed tap.
+- `apex_event`: total recognized TAP/SMD/Tilt events (binary sequence).
+- `smd_event`, `tilt_event`: recognized SMD/Tilt flags.
+- `report_fn_err`, `event_fn_err`: callbacks returning FALSE (when enabled).
 - `unkn_intr`: a semaphore wakeup without eDMP event status.
-- `unkn_apex_intr`: an eDMP event without a tap flag in APEX status.
+- `unkn_apex_intr`: an eDMP event without a recognized enabled algorithm flag in APEX status.
 - `irq_pin_high`: accepted falling-edge ISR events with the pin already HIGH; not a loss counter.
 - `stale_irq`: GPIO ISR events received while acquisition is disarmed.
 - `stm_rst`: completed recovery cycles, not the initial startup reset.
@@ -232,7 +359,7 @@ This module requires the base `icm45686` driver (`icm45686.c`, `icm45686.h` and
 `icm45686_def.h`) for SPI/IREG access, register configuration and interrupt control.
 The eDMP LL additionally uses the project's timing and error-handling services.
 The STM depends on FreeRTOS tasks/semaphores, SPI/GPIO/pinmux HALs, board definitions,
-command registration, `msg()` output and LEDUI. `sysconf.h`, `board.h` and their
+command registration and `msg()` output. `sysconf.h`, `board.h` and their
 backends come from the parent firmware.
 
 **Compiler ABI:** Base register descriptors use C bit-fields; bit allocation order is

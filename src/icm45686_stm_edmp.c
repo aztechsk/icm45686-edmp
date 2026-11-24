@@ -10,6 +10,7 @@
 #include <semphr.h>
 #include <queue.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 #include <gentyp.h>
 #include "sysconf.h"
@@ -19,7 +20,6 @@
 #include "msgconf.h"
 #include "criterr.h"
 #include "hwerr.h"
-#include "ledui.h"
 #include "dlycnt.h"
 #include "cmdln.h"
 #include "gpio_hal.h"
@@ -42,12 +42,90 @@
 #if ICM45686_APEX_ODR != ICM45686_APEX_ODR_400HZ && ICM45686_APEX_ODR != ICM45686_APEX_ODR_800HZ
 #error "ICM45686_APEX_ODR must be 400 or 800 Hz"
 #endif
+#ifndef ICM45686_APEX_SMD_ENABLE
+#error "ICM45686_APEX_SMD_ENABLE not defined; define it in sysconf.h"
+#endif
+#if ICM45686_APEX_SMD_ENABLE != 0 && ICM45686_APEX_SMD_ENABLE != 1
+#error "ICM45686_APEX_SMD_ENABLE must be 0 or 1"
+#endif
+#ifndef ICM45686_APEX_TILT_ENABLE
+#error "ICM45686_APEX_TILT_ENABLE not defined; define it in sysconf.h"
+#endif
+#if ICM45686_APEX_TILT_ENABLE != 0 && ICM45686_APEX_TILT_ENABLE != 1
+#error "ICM45686_APEX_TILT_ENABLE must be 0 or 1"
+#endif
+#if ICM45686_APEX_SMD_ENABLE == 1
+#if ICM_45686_USE_BASIC_SMD == 1
+#ifndef ICM45686_APEX_BASICSMD_WIN
+#error "ICM45686_APEX_BASICSMD_WIN not defined; define it in sysconf.h"
+#elif ICM45686_APEX_BASICSMD_WIN < 25 || ICM45686_APEX_BASICSMD_WIN > 500
+#error "ICM45686_APEX_BASICSMD_WIN must be in range 25..500"
+#endif
+#ifndef ICM45686_APEX_BASICSMD_WIN_WAIT
+#error "ICM45686_APEX_BASICSMD_WIN_WAIT not defined; define it in sysconf.h"
+#elif ICM45686_APEX_BASICSMD_WIN_WAIT < 25 || ICM45686_APEX_BASICSMD_WIN_WAIT > 500
+#error "ICM45686_APEX_BASICSMD_WIN_WAIT must be in range 25..500"
+#endif
+#ifndef ICM45686_APEX_BASICSMD_WOM_X_THR
+#error "ICM45686_APEX_BASICSMD_WOM_X_THR not defined; define it in sysconf.h"
+#elif ICM45686_APEX_BASICSMD_WOM_X_THR < 0 || ICM45686_APEX_BASICSMD_WOM_X_THR > 255
+#error "ICM45686_APEX_BASICSMD_WOM_X_THR must be in range 0..255"
+#endif
+#ifndef ICM45686_APEX_BASICSMD_WOM_Y_THR
+#error "ICM45686_APEX_BASICSMD_WOM_Y_THR not defined; define it in sysconf.h"
+#elif ICM45686_APEX_BASICSMD_WOM_Y_THR < 0 || ICM45686_APEX_BASICSMD_WOM_Y_THR > 255
+#error "ICM45686_APEX_BASICSMD_WOM_Y_THR must be in range 0..255"
+#endif
+#ifndef ICM45686_APEX_BASICSMD_WOM_Z_THR
+#error "ICM45686_APEX_BASICSMD_WOM_Z_THR not defined; define it in sysconf.h"
+#elif ICM45686_APEX_BASICSMD_WOM_Z_THR < 0 || ICM45686_APEX_BASICSMD_WOM_Z_THR > 255
+#error "ICM45686_APEX_BASICSMD_WOM_Z_THR must be in range 0..255"
+#endif
+#else
+#ifndef ICM45686_APEX_SMD_SENSITIVITY
+#error "ICM45686_APEX_SMD_SENSITIVITY not defined; define it in sysconf.h"
+#elif ICM45686_APEX_SMD_SENSITIVITY < 0 || ICM45686_APEX_SMD_SENSITIVITY > 4
+#error "ICM45686_APEX_SMD_SENSITIVITY must be in range 0..4"
+#endif
+#endif
+#endif
+#if ICM45686_APEX_TILT_ENABLE == 1
+#ifndef ICM45686_APEX_TILT_WAIT_TIME
+#error "ICM45686_APEX_TILT_WAIT_TIME not defined; define it in sysconf.h"
+#elif ICM45686_APEX_TILT_WAIT_TIME < 0 || ICM45686_APEX_TILT_WAIT_TIME > 65535
+#error "ICM45686_APEX_TILT_WAIT_TIME must be in range 0..65535"
+#endif
+#endif
 #ifdef ICM45686_RESET_STM_TMO_MS
 #if ICM45686_RESET_STM_TMO_MS <= 0
 #error "ICM45686_RESET_STM_TMO_MS must be positive"
 #endif
 #endif
 #define WAIT_ISR_SIG_TMO_MS 200
+#define ICM45686_REPORT_TO_MSG 1U
+#define ICM45686_REPORT_TO_CALLBACK 2U
+
+#ifndef ICM45686_REPORT_APEX_TAP
+#define ICM45686_REPORT_APEX_TAP 1
+#endif
+#ifndef ICM45686_REPORT_APEX_SMD
+#define ICM45686_REPORT_APEX_SMD 1
+#endif
+#ifndef ICM45686_REPORT_APEX_TILT
+#define ICM45686_REPORT_APEX_TILT 1
+#endif
+#if ICM45686_REPORT_APEX_TAP < 0 || ICM45686_REPORT_APEX_TAP > 3 || \
+    ICM45686_REPORT_APEX_SMD < 0 || ICM45686_REPORT_APEX_SMD > 3 || \
+    ICM45686_REPORT_APEX_TILT < 0 || ICM45686_REPORT_APEX_TILT > 3
+#error "ICM45686_REPORT_APEX_* values must be 0 (off), 1 (msg), 2 (callback), or 3 (both)"
+#endif
+#if ICM45686_REPORT_FN == 0 && \
+    ((ICM45686_REPORT_APEX_TAP & 2) || (ICM45686_REPORT_APEX_SMD & 2) || (ICM45686_REPORT_APEX_TILT & 2))
+#error "ICM45686_REPORT_FN must be 1 when a text report is routed to the callback"
+#endif
+#if ICM45686_REPORT_FN == 1
+#define ICM45686_REPORT_BUF_SIZE 64U
+#endif
 
 static TaskHandle_t tsk_hndl;
 static struct icm_45686_dsc icm_45686_dsc;
@@ -56,9 +134,19 @@ static p_stf_t stmf;
 static SemaphoreHandle_t isr_sig;
 static volatile boolean_t irq_armed;
 static unsigned int odr_us;
+#if ICM45686_REPORT_FN == 1
+static boolean_t (*report_clbk)(const char *);
+static char report_buf[ICM45686_REPORT_BUF_SIZE];
+#endif
+#if ICM45686_REPORT_EVENT_FN == 1
+static boolean_t (*event_clbk)(const struct icm45686_apex_event *);
+#endif
 
 static struct {
 	unsigned int edmp_event_cnt;
+	unsigned int apex_event_cnt;
+	unsigned int smd_event_cnt;
+	unsigned int tilt_event_cnt;
 	unsigned int unkn_intr_cnt;
 	unsigned int unkn_apex_intr_cnt;
 	volatile unsigned int irq_pin_high_cnt;
@@ -71,6 +159,12 @@ static struct {
 	unsigned int int_stat_err_cnt;
 	unsigned int apex_stat_err_cnt;
 	unsigned int tap_data_err_cnt;
+#if ICM45686_REPORT_FN == 1
+	unsigned int report_fn_err_cnt;
+#endif
+#if ICM45686_REPORT_EVENT_FN == 1
+	unsigned int event_fn_err_cnt;
+#endif
 } stats;
 
 static gfp_t state_sw_reset(void);
@@ -85,6 +179,11 @@ static gfp_t state_error(void);
 static void tsk(void *p);
 static void cmd_icms(void);
 static void log_tap_config(const icm_45686_edmp_apex_parameters_t *ap);
+#if ICM45686_APEX_SMD_ENABLE == 1 || ICM45686_APEX_TILT_ENABLE == 1
+static void log_smd_tilt_config(const icm_45686_edmp_apex_parameters_t *ap);
+#endif
+static void report_event(enum icm45686_apex_event_type type, unsigned int dest,
+			 const icm_45686_edmp_tap_data_t *tap_data);
 static char tap_axis_to_ch(icm_45686_edmp_tap_axis_t axis);
 static char tap_dir_to_ch(icm_45686_edmp_tap_dir_t dir);
 
@@ -113,6 +212,26 @@ void init_icm45686_stm_edmp(void)
 		crit_err_exit(MALLOC_ERROR);
 	}
 }
+
+#if ICM45686_REPORT_FN == 1
+/**
+ * icm45686_stm_set_report_fn
+ */
+void icm45686_stm_set_report_fn(boolean_t (*report_fn)(const char *))
+{
+	report_clbk = report_fn;
+}
+#endif
+
+#if ICM45686_REPORT_EVENT_FN == 1
+/**
+ * icm45686_stm_set_event_fn
+ */
+void icm45686_stm_set_event_fn(boolean_t (*event_fn)(const struct icm45686_apex_event *))
+{
+	event_clbk = event_fn;
+}
+#endif
 
 /**
  * state_sw_reset
@@ -215,6 +334,32 @@ err:
 	msg(INF, "ICM45686: intr_cfg() error (%s)\n", hwerr_str(ret));
 	return ((gfp_t) state_error);
 }
+
+#if ICM45686_APEX_SMD_ENABLE == 1 && ICM_45686_USE_BASIC_SMD == 1
+/**
+ * init_basic_smd_wom
+ */
+static int init_basic_smd_wom(void)
+{
+	int ret;
+	uint8_t thr[3] = {ICM45686_APEX_BASICSMD_WOM_X_THR, ICM45686_APEX_BASICSMD_WOM_Y_THR,
+			  ICM45686_APEX_BASICSMD_WOM_Z_THR};
+	struct icm_45686_tmst_wom_config wom_cfg;
+
+	if ((ret = icm_45686_ireg_write(icm, ICM_45686_ACCEL_WOM_X_THR, thr, sizeof(thr)))) {
+		return (ret);
+	}
+	if ((ret = icm_45686_bank0_read(icm, ICM_45686_TMST_WOM_CONFIG, &wom_cfg, 1))) {
+		return (ret);
+	}
+	/* WOM feeds Basic SMD internally; do not route WOM events to INT1. */
+	wom_cfg.wom_mode = ICM_45686_TMST_WOM_CONFIG_MODE_CMP_PREV;
+	wom_cfg.wom_int_mode = ICM_45686_TMST_WOM_CONFIG_INT_MODE_ORED;
+	wom_cfg.wom_int_dur = ICM_45686_TMST_WOM_CONFIG_INT_DUR_1_SMPL;
+	wom_cfg.wom_en = ICM_45686_ENABLE;
+	return (icm_45686_bank0_write(icm, ICM_45686_TMST_WOM_CONFIG, &wom_cfg, 1, TRUE));
+}
+#endif
 
 /**
  * init_edmp
@@ -322,6 +467,24 @@ static gfp_t init_edmp(void)
 	 */
 	apex_parameters.tap_tavg = ICM45686_APEX_TAP_TAVG;
 	log_tap_config(&apex_parameters);
+#if ICM45686_APEX_SMD_ENABLE == 1
+#if ICM_45686_USE_BASIC_SMD == 1
+	/* Number of samples with continuous WOM before SMD is triggered. */
+	apex_parameters.basicsmd_win = ICM45686_APEX_BASICSMD_WIN;
+	/* Number of samples after WOM stops before SMD triggering stops. */
+	apex_parameters.basicsmd_win_wait = ICM45686_APEX_BASICSMD_WIN_WAIT;
+#else
+	/* Lower values increase detection rate and false positives. */
+	apex_parameters.smd_sensitivity = ICM45686_APEX_SMD_SENSITIVITY;
+#endif
+#endif
+#if ICM45686_APEX_TILT_ENABLE == 1
+	/* Minimum tilt duration in samples at the internal 50 Hz ODR. */
+	apex_parameters.tilt_wait_time = ICM45686_APEX_TILT_WAIT_TIME;
+#endif
+#if ICM45686_APEX_SMD_ENABLE == 1 || ICM45686_APEX_TILT_ENABLE == 1
+	log_smd_tilt_config(&apex_parameters);
+#endif
 	if ((ret = icm_45686_edmp_set_apex_parameters(icm, &apex_parameters))) {
 		goto err;
 	}
@@ -333,6 +496,23 @@ static gfp_t init_edmp(void)
 		goto err;
 	}
 	apex_int_config.tap = ICM_45686_ENABLE;
+#if ICM45686_APEX_SMD_ENABLE == 1
+#if ICM_45686_USE_BASIC_SMD == 1
+	if ((ret = init_basic_smd_wom())) {
+		goto err;
+	}
+#endif
+	if ((ret = icm_45686_edmp_enable_smd(icm))) {
+		goto err;
+	}
+	apex_int_config.smd = ICM_45686_ENABLE;
+#endif
+#if ICM45686_APEX_TILT_ENABLE == 1
+	if ((ret = icm_45686_edmp_enable_tilt(icm))) {
+		goto err;
+	}
+	apex_int_config.tilt_det = ICM_45686_ENABLE;
+#endif
 	if ((ret = icm_45686_edmp_set_config_int_apex(icm, &apex_int_config))) {
 		goto err;
 	}
@@ -386,16 +566,26 @@ static gfp_t wait_intr(void)
 				goto err;
 			}
 			if (tap_data.num == ICM_45686_EDMP_TAP_DOUBLE) {
-				set_ledui_led_state(LEDUI4, LEDUI_LED_ON);
-				msg(INF, "ICM45686: DOUBLE_TAP %c%c %u ms\n",
-				    tap_dir_to_ch(tap_data.direction), tap_axis_to_ch(tap_data.axis),
-				    tap_data.double_tap_timing * odr_us / 1000);
+				report_event(ICM45686_APEX_EVENT_DOUBLE_TAP, ICM45686_REPORT_APEX_TAP, &tap_data);
 			} else {
-				set_ledui_led_state(LEDUI4, LEDUI_LED_OFF);
-				msg(INF, "ICM45686: SINGLE_TAP %c%c\n",
-				    tap_dir_to_ch(tap_data.direction), tap_axis_to_ch(tap_data.axis));
+				report_event(ICM45686_APEX_EVENT_SINGLE_TAP, ICM45686_REPORT_APEX_TAP, &tap_data);
 			}
-		} else {
+		}
+#if ICM45686_APEX_SMD_ENABLE == 1
+		if (apex_state.smd) {
+			stats.smd_event_cnt++;
+			report_event(ICM45686_APEX_EVENT_SMD, ICM45686_REPORT_APEX_SMD, NULL);
+		}
+#endif
+#if ICM45686_APEX_TILT_ENABLE == 1
+		if (apex_state.tilt_det) {
+			stats.tilt_event_cnt++;
+			report_event(ICM45686_APEX_EVENT_TILT, ICM45686_REPORT_APEX_TILT, NULL);
+		}
+#endif
+		if (!apex_state.tap &&
+		    !(ICM45686_APEX_SMD_ENABLE && apex_state.smd) &&
+		    !(ICM45686_APEX_TILT_ENABLE && apex_state.tilt_det)) {
 			stats.unkn_apex_intr_cnt++;
 		}
 	} else {
@@ -495,8 +685,16 @@ static void cmd_icms(void)
 	msg(INF, cmd_accp);
 	msg(INF, "ICM45686 cnt: edmp_event=%u unkn_intr=%u unkn_apex_intr=%u\n",
 	    stats.edmp_event_cnt, stats.unkn_intr_cnt, stats.unkn_apex_intr_cnt);
+	msg(INF, "ICM45686 cnt: apex_event=%u smd_event=%u tilt_event=%u\n",
+	    stats.apex_event_cnt, stats.smd_event_cnt, stats.tilt_event_cnt);
 	msg(INF, "ICM45686 cnt: irq_pin_high=%u stale_irq=%u stm_rst=%u\n",
 	    stats.irq_pin_high_cnt, stats.stale_irq_cnt, stats.stm_rst_cnt);
+#if ICM45686_REPORT_FN == 1
+	msg(INF, "ICM45686 cnt: report_fn_err=%u\n", stats.report_fn_err_cnt);
+#endif
+#if ICM45686_REPORT_EVENT_FN == 1
+	msg(INF, "ICM45686 cnt: event_fn_err=%u\n", stats.event_fn_err_cnt);
+#endif
 	msg(INF, "ICM45686 STM err: sw_reset=%u probe=%u cfg=%u edmp_init=%u\n",
 	    stats.sw_reset_err_cnt, stats.probe_err_cnt, stats.cfg_err_cnt, stats.edmp_init_err_cnt);
 	msg(INF, "ICM45686 STM err: int_stat=%u apex_stat=%u tap_data=%u\n",
@@ -527,6 +725,123 @@ static void log_tap_config(const icm_45686_edmp_apex_parameters_t *ap)
 	msg(INF, "ICM45686: TAP_TAVG=%hhu (0x%02hhX) range: [1, 2, 4, 8]\n",
 	    ap->tap_tavg, ap->tap_tavg);
 	vTaskPrioritySet(NULL, pr);
+}
+
+#if ICM45686_APEX_SMD_ENABLE == 1 || ICM45686_APEX_TILT_ENABLE == 1
+/**
+ * log_smd_tilt_config
+ */
+static void log_smd_tilt_config(const icm_45686_edmp_apex_parameters_t *ap)
+{
+	UBaseType_t pr;
+
+	pr = uxTaskPriorityGet(NULL);
+	vTaskPrioritySet(NULL, TASK_PRIO_HIGH);
+#if ICM45686_APEX_SMD_ENABLE == 1
+#if ICM_45686_USE_BASIC_SMD == 1
+	msg(INF, "ICM45686: APEX Basic SMD config >>>>>>>>\n");
+	msg(INF, "ICM45686: BASICSMD_WIN=%lu (0x%08lX) range: [25 - 500]\n",
+	    (unsigned long) ap->basicsmd_win, (unsigned long) ap->basicsmd_win);
+	msg(INF, "ICM45686: BASICSMD_WIN_WAIT=%lu (0x%08lX) range: [25 - 500]\n",
+	    (unsigned long) ap->basicsmd_win_wait, (unsigned long) ap->basicsmd_win_wait);
+	msg(INF, "ICM45686: BASICSMD_WOM_X_THR=%u (0x%02X) range: [0 - 255]\n",
+	    (unsigned int) ICM45686_APEX_BASICSMD_WOM_X_THR, (unsigned int) ICM45686_APEX_BASICSMD_WOM_X_THR);
+	msg(INF, "ICM45686: BASICSMD_WOM_Y_THR=%u (0x%02X) range: [0 - 255]\n",
+	    (unsigned int) ICM45686_APEX_BASICSMD_WOM_Y_THR, (unsigned int) ICM45686_APEX_BASICSMD_WOM_Y_THR);
+	msg(INF, "ICM45686: BASICSMD_WOM_Z_THR=%u (0x%02X) range: [0 - 255]\n",
+	    (unsigned int) ICM45686_APEX_BASICSMD_WOM_Z_THR, (unsigned int) ICM45686_APEX_BASICSMD_WOM_Z_THR);
+#else
+	msg(INF, "ICM45686: APEX SMD config >>>>>>>>\n");
+	msg(INF, "ICM45686: SMD_SENSITIVITY=%hhu (0x%02hhX) range: [0 - 4]\n",
+	    ap->smd_sensitivity, ap->smd_sensitivity);
+#endif
+#endif
+#if ICM45686_APEX_TILT_ENABLE == 1
+	msg(INF, "ICM45686: APEX Tilt config >>>>>>>>\n");
+	msg(INF, "ICM45686: TILT_WAIT_TIME=%hu (0x%04hX) range: [0 - 65535] (%u ms)\n",
+	    ap->tilt_wait_time, ap->tilt_wait_time, (unsigned int) ap->tilt_wait_time * 20U);
+#endif
+	vTaskPrioritySet(NULL, pr);
+}
+#endif
+
+#if ICM45686_REPORT_FN == 1
+/**
+ * report_line
+ */
+static void report_line(unsigned int dest, const char *fmt, ...)
+{
+	va_list ap;
+	int n;
+
+	if (!(dest & ICM45686_REPORT_TO_MSG) && (!(dest & ICM45686_REPORT_TO_CALLBACK) || report_clbk == NULL)) {
+		return;
+	}
+	va_start(ap, fmt);
+	n = vsnprintf(report_buf, sizeof(report_buf), fmt, ap);
+	va_end(ap);
+	if (n < 0 || (size_t) n >= sizeof(report_buf)) {
+		msg(INF, "ICM45686: report_line() formatting error\n");
+		return;
+	}
+	if (dest & ICM45686_REPORT_TO_MSG) {
+		msg(INF, "%s", report_buf);
+	}
+	if ((dest & ICM45686_REPORT_TO_CALLBACK) && report_clbk != NULL && !report_clbk(report_buf)) {
+		stats.report_fn_err_cnt++;
+	}
+}
+#else
+#define report_line(dest, ...) do { \
+	if ((dest) & ICM45686_REPORT_TO_MSG) { \
+		msg(INF, __VA_ARGS__); \
+	} \
+} while (0)
+#endif
+
+/**
+ * report_event
+ */
+static void report_event(enum icm45686_apex_event_type type, unsigned int dest,
+			 const icm_45686_edmp_tap_data_t *tap_data)
+{
+	unsigned int double_tap_ms = 0;
+
+	stats.apex_event_cnt++;
+	if (type == ICM45686_APEX_EVENT_DOUBLE_TAP) {
+		double_tap_ms = tap_data->double_tap_timing * odr_us / 1000;
+	}
+#if ICM45686_REPORT_EVENT_FN == 1
+	if (event_clbk != NULL) {
+		struct icm45686_apex_event event = {0};
+		event.sequence = stats.apex_event_cnt;
+		event.type = (uint8_t) type;
+		event.double_tap_ms = (uint16_t) double_tap_ms;
+		if (tap_data != NULL) {
+			event.tap_axis = (uint8_t) tap_data->axis;
+			event.tap_direction = (uint8_t) tap_data->direction;
+		}
+		if (!event_clbk(&event)) {
+			stats.event_fn_err_cnt++;
+		}
+	}
+#endif
+	switch (type) {
+	case ICM45686_APEX_EVENT_SINGLE_TAP :
+		report_line(dest, "ICM45686: SINGLE_TAP %c%c\n",
+		    tap_dir_to_ch(tap_data->direction), tap_axis_to_ch(tap_data->axis));
+		break;
+	case ICM45686_APEX_EVENT_DOUBLE_TAP :
+		report_line(dest, "ICM45686: DOUBLE_TAP %c%c %u ms\n",
+		    tap_dir_to_ch(tap_data->direction), tap_axis_to_ch(tap_data->axis), double_tap_ms);
+		break;
+	case ICM45686_APEX_EVENT_SMD :
+		report_line(dest, "ICM45686: SMD\n");
+		break;
+	case ICM45686_APEX_EVENT_TILT :
+		report_line(dest, "ICM45686: TILT\n");
+		break;
+	}
 }
 
 /**
